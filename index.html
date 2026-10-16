@@ -64,6 +64,19 @@
   #resetAll { flex: 1; background: var(--card); color: var(--danger); }
   #add { flex: 2; background: var(--fg); color: var(--bg); }
   .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+  #modal {
+    position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  #modal[hidden] { display: none; }
+  .sheet { background: var(--card); border-radius: 16px; padding: 20px 16px 16px; width: min(320px, 100%); }
+  .sheet p { margin: 0 0 18px; text-align: center; font-size: 16px; word-break: break-all; }
+  .sheet div { display: flex; gap: 10px; }
+  .sheet button {
+    flex: 1; height: 44px; border: 0; border-radius: 10px; font: inherit; font-weight: 600;
+    background: var(--line); color: var(--fg);
+  }
+  .sheet #mOk { background: var(--danger); color: #fff; }
 </style>
 </head>
 <body>
@@ -76,6 +89,12 @@
 <div class="bar">
   <button id="resetAll">全部复位</button>
   <button id="add">＋ 添加计时器</button>
+</div>
+<div id="modal" hidden role="dialog" aria-modal="true">
+  <div class="sheet">
+    <p id="mMsg"></p>
+    <div><button id="mCancel">取消</button><button id="mOk"></button></div>
+  </div>
 </div>
 
 <script>
@@ -163,18 +182,35 @@
     $total.innerHTML = timers.length ? '合计 ' + fmt(total).replace(/<\/?small>/g, '') : '';
   }
 
-  $list.addEventListener('click', e => {
+  // in-page confirm: native confirm() is blocked in some embedded webviews
+  const $modal = document.getElementById('modal');
+  function ask(msg, okText) {
+    document.getElementById('mMsg').textContent = msg;
+    document.getElementById('mOk').textContent = okText;
+    $modal.hidden = false;
+    return new Promise(resolve => {
+      $modal.onclick = e => {
+        const ok = e.target.id === 'mOk';
+        if (!ok && e.target.id !== 'mCancel' && e.target !== $modal) return;
+        $modal.hidden = true;
+        $modal.onclick = null;
+        resolve(ok);
+      };
+    });
+  }
+
+  $list.addEventListener('click', async e => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
     const t = find(btn.closest('li').dataset.id);
     const act = btn.dataset.act;
     if (act === 'toggle') toggle(t);
     else if (act === 'reset') {
-      if (!valueOf(t) || !confirm(`复位「${t.name}」？`)) return;
+      if (!valueOf(t) || !await ask(`复位「${t.name}」？`, '复位')) return;
       reset(t);
     }
     else if (act === 'del') {
-      if (!confirm(`删除「${t.name}」？`)) return;
+      if (!await ask(`删除「${t.name}」？`, '删除')) return;
       timers = timers.filter(x => x !== t);
       save(); render(); return;
     }
@@ -195,9 +231,9 @@
     if (t && !t.name.trim()) { t.name = '未命名'; e.target.value = t.name; save(); }
   });
 
-  document.getElementById('resetAll').addEventListener('click', () => {
+  document.getElementById('resetAll').addEventListener('click', async () => {
     if (!timers.some(t => valueOf(t) > 0)) return;
-    if (!confirm('停止并复位所有计时器？')) return;
+    if (!await ask('停止并复位所有计时器？', '全部复位')) return;
     timers.forEach(t => { t.elapsed = 0; t.startedAt = null; });
     save(); paint();
   });
