@@ -169,9 +169,12 @@
     const t = find(btn.closest('li').dataset.id);
     const act = btn.dataset.act;
     if (act === 'toggle') toggle(t);
-    else if (act === 'reset') reset(t);
+    else if (act === 'reset') {
+      if (!valueOf(t) || !confirm(`复位「${t.name}」？`)) return;
+      reset(t);
+    }
     else if (act === 'del') {
-      if (valueOf(t) > 0 && !confirm(`删除「${t.name}」？`)) return;
+      if (!confirm(`删除「${t.name}」？`)) return;
       timers = timers.filter(x => x !== t);
       save(); render(); return;
     }
