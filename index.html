@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>接力计时器</title>
+<style>
+  :root {
+    --bg: #f4f4f5; --card: #ffffff; --fg: #18181b; --muted: #71717a;
+    --line: #e4e4e7; --accent: #16a34a; --pause: #ea580c; --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111111; --card: #1c1c1e; --fg: #f4f4f5; --muted: #a1a1aa; --line: #2c2c2e; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(96px + env(safe-area-inset-bottom));
+    max-width: 560px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; padding: 20px 0 12px; }
+  h1 { font-size: 22px; margin: 0; }
+  #total { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  li {
+    background: var(--card); border-radius: 16px; padding: 14px 16px;
+    border: 2px solid transparent; transition: border-color .15s;
+  }
+  li.running { border-color: var(--accent); }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .name {
+    flex: 1; min-width: 0; font: inherit; font-weight: 600; color: var(--fg);
+    background: transparent; border: 0; border-bottom: 1px dashed transparent; padding: 2px 0; outline: none;
+  }
+  .name:focus { border-bottom-color: var(--muted); }
+  .del { border: 0; background: none; color: var(--muted); font-size: 22px; line-height: 1; padding: 4px 8px; }
+  .time {
+    font-size: 44px; font-weight: 300; font-variant-numeric: tabular-nums;
+    letter-spacing: -1px; margin: 6px 0 10px;
+  }
+  .time small { font-size: 24px; color: var(--muted); }
+  li.running .time { color: var(--accent); }
+  .btns { display: flex; gap: 10px; }
+  .btns button {
+    flex: 1; height: 46px; border: 0; border-radius: 12px; font: inherit; font-weight: 600;
+    background: var(--line); color: var(--fg);
+  }
+  .btns .toggle { background: var(--accent); color: #fff; flex: 2; }
+  li.running .toggle { background: var(--pause); }
+  button:active { opacity: .7; }
+  #add {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(20px + env(safe-area-inset-bottom));
+    width: min(528px, calc(100% - 32px)); height: 54px; border: 0; border-radius: 27px;
+    background: var(--fg); color: var(--bg); font: inherit; font-size: 17px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,.2);
+  }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>接力计时器</h1>
+  <span id="total"></span>
+</header>
+<ul id="list"></ul>
+<p class="empty" id="empty" hidden>还没有计时器，点下方按钮添加</p>
+<button id="add">＋ 添加计时器</button>
+
+<script>
+(() => {
+  const KEY = 'baton-timer:v1';
+  const $list = document.getElementById('list');
+  const $empty = document.getElementById('empty');
+  const $total = document.getElementById('total');
+
+  // timer: { id, name, elapsed (ms accumulated before current run), startedAt (ms epoch | null) }
+  let timers = load();
+
+  function load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(KEY));
+      if (Array.isArray(data)) return data;
+    } catch (e) {}
+    return [newTimer(1)];
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(timers)); } catch (e) {}
+  }
+  function newTimer(n) {
+    return { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: '计时器 ' + n, elapsed: 0, startedAt: null };
+  }
+  const now = () => Date.now();
+  const valueOf = t => t.elapsed + (t.startedAt ? now() - t.startedAt : 0);
+  const find = id => timers.find(t => t.id === id);
+
+  function fmt(ms) {
+    const cs = Math.floor(ms / 10) % 100;
+    const s = Math.floor(ms / 1000);
+    const pad = n => String(n).padStart(2, '0');
+    const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = s % 60;
+    return (h ? h + ':' + pad(m) : pad(m)) + ':' + pad(sec) + '<small>.' + pad(cs) + '</small>';
+  }
+
+  function pause(t) {
+    if (!t.startedAt) return;
+    t.elapsed += now() - t.startedAt;
+    t.startedAt = null;
+  }
+  function toggle(t) {
+    if (t.startedAt) { pause(t); }
+    else {
+      timers.forEach(pause); // only one runs at a time
+      t.startedAt = now();
+    }
+  }
+  function reset(t) { t.elapsed = 0; t.startedAt = t.startedAt ? now() : null; }
+
+  function render() {
+    $list.innerHTML = '';
+    timers.forEach(t => {
+      const li = document.createElement('li');
+      li.dataset.id = t.id;
+      li.innerHTML = `
+        <div class="top">
+          <input class="name" maxlength="30" enterkeyhint="done" aria-label="计时器名称">
+          <button class="del" data-act="del" aria-label="删除">×</button>
+        </div>
+        <div class="time"></div>
+        <div class="btns">
+          <button class="toggle" data-act="toggle"></button>
+          <button data-act="reset">复位</button>
+        </div>`;
+      li.querySelector('.name').value = t.name;
+      $list.appendChild(li);
+    });
+    $empty.hidden = timers.length > 0;
+    paint();
+  }
+
+  // update dynamic parts only, so inputs keep focus
+  function paint() {
+    let total = 0;
+    for (const li of $list.children) {
+      const t = find(li.dataset.id);
+      const v = valueOf(t);
+      total += v;
+      li.classList.toggle('running', !!t.startedAt);
+      li.querySelector('.time').innerHTML = fmt(v);
+      li.querySelector('.toggle').textContent = t.startedAt ? '暂停' : (v ? '继续' : '开始');
+    }
+    $total.innerHTML = timers.length ? '合计 ' + fmt(total).replace(/<\/?small>/g, '') : '';
+  }
+
+  $list.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const t = find(btn.closest('li').dataset.id);
+    const act = btn.dataset.act;
+    if (act === 'toggle') toggle(t);
+    else if (act === 'reset') reset(t);
+    else if (act === 'del') {
+      if (valueOf(t) > 0 && !confirm(`删除「${t.name}」？`)) return;
+      timers = timers.filter(x => x !== t);
+      save(); render(); return;
+    }
+    save(); paint();
+  });
+
+  $list.addEventListener('input', e => {
+    if (!e.target.classList.contains('name')) return;
+    find(e.target.closest('li').dataset.id).name = e.target.value;
+    save();
+  });
+  $list.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.classList.contains('name')) e.target.blur();
+  });
+  $list.addEventListener('focusout', e => {
+    if (!e.target.classList.contains('name')) return;
+    const t = find(e.target.closest('li').dataset.id);
+    if (t && !t.name.trim()) { t.name = '未命名'; e.target.value = t.name; save(); }
+  });
+
+  document.getElementById('add').addEventListener('click', () => {
+    timers.push(newTimer(timers.length + 1));
+    save(); render();
+    const inputs = $list.querySelectorAll('.name');
+    inputs[inputs.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  (function loop() {
+    if (timers.some(t => t.startedAt)) paint();
+    requestAnimationFrame(loop);
+  })();
+  document.addEventListener('visibilitychange', paint);
+
+  render();
+})();
+</script>
+</body>
+</html>
